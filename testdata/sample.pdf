@@ -1,0 +1,94 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 3 /Kids [7 0 R 9 0 R 11 0 R ] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /Identity-H /DescendantFonts [5 0 R] /ToUnicode 6 0 R >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 0 >> /DW 1000 >>
+endobj
+6 0 obj
+<< /Length 422 >>
+stream
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Test def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+8 beginbfchar
+<0001> <4FDD>
+<0002> <9669>
+<0003> <6761>
+<0004> <6B3E>
+<0005> <6D4B>
+<0006> <8BD5>
+<0007> <8D44>
+<0008> <6599>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 151 >>
+stream
+BT /F1 12 Tf 72 720 Td (Page 1: Synthetic insurance fixture. Not a real policy.) Tj ET
+BT /F2 12 Tf 72 690 Td <00010002000300040005000600070008> Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 10 0 R >>
+endobj
+10 0 obj
+<< /Length 148 >>
+stream
+BT /F1 12 Tf 72 720 Td (Page 2: Test coverage clause. For parser tests only.) Tj ET
+BT /F2 12 Tf 72 690 Td <00010002000300040005000600070008> Tj ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 12 0 R >>
+endobj
+12 0 obj
+<< /Length 147 >>
+stream
+BT /F1 12 Tf 72 720 Td (Page 3: Test exclusion clause. No insurance advice.) Tj ET
+BT /F2 12 Tf 72 690 Td <00010002000300040005000600070008> Tj ET
+endstream
+endobj
+xref
+0 13
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000129 00000 n 
+0000000226 00000 n 
+0000000363 00000 n 
+0000000521 00000 n 
+0000000993 00000 n 
+0000001129 00000 n 
+0000001330 00000 n 
+0000001467 00000 n 
+0000001666 00000 n 
+0000001804 00000 n 
+trailer
+<< /Size 13 /Root 1 0 R >>
+startxref
+2002
+%%EOF
