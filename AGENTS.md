@@ -4,19 +4,20 @@
 
 This repository is a learning-oriented insurance AI agent built in small, reviewable milestones.
 Keep each change scoped to the active milestone and preserve code readability for study.
-The current milestone is M1: import a local text-based PDF and produce inspectable page-level JSON.
+The current milestone is M2: split an imported page-level JSON document into inspectable clause-aware chunks.
 
 ## Architecture boundaries
 
-- Go owns the CLI, validation, metadata, SHA-256, quality gates, and JSON persistence.
+- Go owns the CLI, validation, metadata, SHA-256, quality gates, deterministic chunking, and JSON persistence.
 - Python is limited to PDF text extraction through `pdfplumber`.
 - Keep third-party parser details behind `internal/parser.Parser`.
-- Do not add database, embedding, retrieval, LLM, Gin, or React work to M1 changes.
-- OCR is out of scope for M1; reject unsupported scanned or low-quality documents clearly.
+- Do not add database, embedding, retrieval, LLM, Gin, or React work to M2 changes.
+- OCR is out of scope for M2; reject unsupported scanned or low-quality documents clearly.
 
 ## PDF correctness rules
 
 - Preserve physical PDF page numbers, including blank pages.
+- Keep every chunk on one physical PDF page; carry clause metadata across page boundaries instead of merging pages.
 - Never treat a successfully opened PDF as proof that extracted text is trustworthy.
 - Reject documents with no extracted text or any Unicode replacement character (`U+FFFD`).
 - Do not use an LLM to guess or repair insurance policy wording.
@@ -43,6 +44,7 @@ go vet ./...
 
 For parser or concurrency changes, also run `go test -race ./...`.
 Parser changes must pass the two real-policy regression tests in `internal/parser/pdf_test.go`.
+Chunker changes must pass the two real-policy regression tests in `internal/chunker/chunker_test.go`.
 
 ## Repository hygiene
 

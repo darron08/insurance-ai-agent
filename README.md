@@ -1,6 +1,6 @@
 # 通用保险 AI Agent
 
-当前完成 M1：通过 Go 命令解析本地文本型 PDF，输出带产品信息、页码和 SHA-256 的 JSON。
+当前完成 M2：先通过 Go 命令将本地文本型 PDF 解析为逐页 JSON，再用独立命令按章节和条款切成可检查的 Chunk JSON。
 
 ## 环境与运行
 
@@ -24,11 +24,23 @@ go run ./cmd/ingest \
 
 查看终端输出的 JSON 路径，即可检查元数据、物理页码和正文。`var/` 中的生成结果已加入 Git 忽略规则。
 
+将上一步输出路径传给 M2 切分命令：
+
+```bash
+go run ./cmd/chunk \
+  --input ./var/imports/<导入命令输出的文件>.json \
+  --output ./var/chunks
+```
+
+切分命令读取已经通过 M1 质量门槛的 JSON，不会再次解析 PDF。当前刻意保留两条独立命令，便于分别观察解析和切分结果；后续里程碑的一键导入会直接在 Go 服务层传递 `Document`，而不是通过执行另一个 CLI 或重新解析 PDF 来串联。
+
 ```bash
 go test ./...
 go vet ./...
 go build -o ./bin/ingest ./cmd/ingest
+go build -o ./bin/chunk ./cmd/chunk
 ./bin/ingest --help
+./bin/chunk --help
 ```
 
 ## 参数
@@ -44,6 +56,29 @@ go build -o ./bin/ingest ./cmd/ingest
 可以用实际保险 PDF 替换文件路径；有公开来源时再填写真实 URL。项目附带两份已下载的平安公开条款及来源说明，见 [`testdata/real/SOURCES.md`](testdata/real/SOURCES.md)。完成后请对照原文抽查至少三页。
 
 成功返回退出码 0；参数语法错误返回 2；输入、解析或输出失败返回 1。`go run` 本身会包装程序退出码；需要直接检查原始退出码时，请使用构建后的 `./bin/ingest`。
+
+## 条款切分
+
+`chunk` 命令参数：
+
+| 参数 | 含义 | 要求 |
+| --- | --- | --- |
+| `--input` | M1 导入生成的 JSON | 必填，普通 `.json` 文件且内容通过 M1 质量校验 |
+| `--output` | Chunk JSON 输出目录 | 默认 `./var/chunks` |
+
+M2 使用固定的 `clause-aware-v1` 策略：识别 `1.1 合同构成` 和 `第一条 ...` 两类条款编号，并从条款前的短标题推断所属章节。目录当页的后续内容按普通文本保存，不作为正文条款；未识别为条款的阅读指引、前言和表格文本也不会丢弃。
+
+常规条款尽量保持完整。单个页面内的条款文本超过 800 个 Unicode 字符时，依次优先在空行、换行和句末标点处分割，必要时才按字符边界分割；相邻子块最多重叠 100 字符。重叠不会跨越条款或物理页面。跨页续文继承条款与章节元数据，但每个 Chunk 始终只对应一个物理 PDF 页。
+
+Chunk JSON 顶层保留源文档元数据、SHA-256、解析器、页数、切分策略和切分时间。每个 Chunk 包含：
+
+- 从 1 开始的 `chunk_index`。
+- 产品、文档名称和版本。
+- `page_number`、`section_title` 和 `clause_id`。
+- 同一条款的 `part_index`、`part_count`。
+- `character_count` 和原文 `text`。
+
+M2 还没有数据库，因此不生成 `document_id`。每次成功切分产生独立结果文件；失败不会留下最终 JSON。
 
 ## 输出与重复运行
 
@@ -64,4 +99,6 @@ go build -o ./bin/ingest ./cmd/ingest
 
 Go 负责校验、SHA-256、质量门槛和 JSON 落盘，内嵌 Python 脚本只调用 `pdfplumber` 逐页提取。出现 `U+FFFD` 替换字符或全文为空会拒绝导入，不会回退到旧解析器；空白页与非空页面混合时保留空白页。M1 不执行 OCR。`quality.status: passed` 表示自动门槛通过，不等同于对条款内容完成人工审校。
 
-代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)。
+M2 的章节识别是确定性启发式，不会使用 LLM 猜测标题或修复条款文字。PDF 若缺少明确条款编号、标题排版异常或表格阅读顺序复杂，可能只得到无条款编号的普通文本 Chunk；这类结果仍需对照原 PDF 人工抽查。固定的 800/100 参数用于建立首个可比较基线，后续质量优化阶段再比较其他策略。
+
+代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md) 和 [M2 学习说明](docs/learning/m2-clause-chunking.md)。

@@ -34,3 +34,38 @@ type Document struct {
 	ImportedAt     time.Time        `json:"imported_at"`
 	Parser         string           `json:"parser"`
 }
+
+type ChunkingConfig struct {
+	Strategy          string `json:"strategy"`
+	MaxCharacters     int    `json:"max_characters"`
+	OverlapCharacters int    `json:"overlap_characters"`
+}
+
+// Chunk always belongs to one physical PDF page. A clause that crosses a page
+// boundary is represented by multiple chunks with the same clause metadata.
+type Chunk struct {
+	ChunkIndex      int    `json:"chunk_index"`
+	ProductID       string `json:"product_id"`
+	DocumentName    string `json:"document_name"`
+	DocumentVersion string `json:"document_version"`
+	PageNumber      int    `json:"page_number"`
+	SectionTitle    string `json:"section_title"`
+	ClauseID        string `json:"clause_id"`
+	PartIndex       int    `json:"part_index"`
+	PartCount       int    `json:"part_count"`
+	CharacterCount  int    `json:"character_count"`
+	Text            string `json:"text"`
+}
+
+type ChunkedDocument struct {
+	Metadata         DocumentMetadata `json:"metadata"`
+	SourceFilePath   string           `json:"source_file_path"`
+	SourceSHA256     string           `json:"source_sha256"`
+	SourceImportedAt time.Time        `json:"source_imported_at"`
+	SourceParser     string           `json:"source_parser"`
+	TotalPages       int              `json:"total_pages"`
+	Chunking         ChunkingConfig   `json:"chunking"`
+	TotalChunks      int              `json:"total_chunks"`
+	Chunks           []Chunk          `json:"chunks"`
+	ChunkedAt        time.Time        `json:"chunked_at"`
+}
