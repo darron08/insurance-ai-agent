@@ -4,15 +4,19 @@
 
 This repository is a learning-oriented insurance AI agent built in small, reviewable milestones.
 Keep each change scoped to the active milestone and preserve code readability for study.
-The current milestone is M3: persist an M2 chunk document in PostgreSQL with migrations, transactions, status, and idempotency.
+The current milestone is M4: index persisted M3 chunks with Eino Embedding and pgvector, including batching, resumability, document locks, and idempotency.
 
 ## Architecture boundaries
 
 - Go owns the CLI, validation, metadata, SHA-256, quality gates, deterministic chunking, JSON persistence, and PostgreSQL persistence.
 - Python is limited to PDF text extraction through `pdfplumber`.
 - Keep third-party parser details behind `internal/parser.Parser`.
-- Keep PostgreSQL details behind the M3 catalog repository boundary so later Gin and Eino adapters can reuse application services.
-- Do not add embedding, retrieval, LLM, Gin, Eino, Redis, Elasticsearch, or React work to M3 changes.
+- Keep PostgreSQL details behind the catalog and indexing repository boundaries so later Gin handlers and workers can reuse application services.
+- Keep Eino types inside the Embedding adapter; application services use project-owned interfaces and context.Context.
+- M4 uses Eino only for Embedding. Do not add retrieval, answer generation, Gin, Graph, Agent, Redis, Elasticsearch, or React work to M4.
+- M4 defaults to locally served `Qwen/Qwen3-Embedding-0.6B` with 1024-dimensional vectors through an OpenAI-compatible endpoint.
+- Indexing uses one locked database connection per document. Keep model requests outside transactions, preserve committed batches on failure, and coordinate replacement with the same document lock.
+- Use the pinned Go 1.27.3 toolchain and dependency versions in go.mod/go.sum.
 - Keep every milestone's DDL as a new versioned SQL file under `db/migrations/`; never edit, rename, delete, or squash an applied migration.
 - OCR is out of scope for M2; reject unsupported scanned or low-quality documents clearly.
 
@@ -44,7 +48,7 @@ go test ./...
 go vet ./...
 ```
 
-PostgreSQL integration tests require a Docker-backed test database whose name contains `test` and a `TEST_DATABASE_URL` connection string.
+PostgreSQL integration tests require a Docker-backed test database whose name contains `test` and a `TEST_DATABASE_URL` connection string. They truncate data and replay migrations; never point them at the demo database. Embedding unit tests use local HTTP servers, never live API credentials.
 
 For parser or concurrency changes, also run `go test -race ./...`.
 Parser changes must pass the two real-policy regression tests in `internal/parser/pdf_test.go`.

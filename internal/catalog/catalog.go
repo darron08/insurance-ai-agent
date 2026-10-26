@@ -33,24 +33,29 @@ type StoreResult struct {
 }
 
 type StoredDocument struct {
-	ID               string
-	ProductID        string
-	Name             string
-	Version          string
-	SourceURL        string
-	SourceFilePath   string
-	SourceSHA256     string
-	SourceImportedAt time.Time
-	SourceParser     string
-	TotalPages       int
-	Chunking         document.ChunkingConfig
-	TotalChunks      int
-	ProcessingStatus string
-	FailedStage      string
-	LastError        string
-	ChunkedAt        time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                  string
+	ProductID           string
+	Name                string
+	Version             string
+	SourceURL           string
+	SourceFilePath      string
+	SourceSHA256        string
+	SourceImportedAt    time.Time
+	SourceParser        string
+	TotalPages          int
+	Chunking            document.ChunkingConfig
+	TotalChunks         int
+	ProcessingStatus    string
+	FailedStage         string
+	LastError           string
+	ChunkedAt           time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	EmbeddingProfile    string
+	EmbeddingBaseURL    string
+	EmbeddingModel      string
+	EmbeddingDimensions int
+	IndexedAt           *time.Time
 }
 
 type StoredChunk struct {

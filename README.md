@@ -1,10 +1,10 @@
 # 通用保险 AI Agent
 
-当前完成 M3：先通过 Go 命令将本地文本型 PDF 解析为逐页 JSON，再按章节和条款切成可检查的 Chunk JSON，最后幂等写入 PostgreSQL。
+当前完成 M4：通过 Go 命令将本地文本型 PDF 解析、切分、幂等写入 PostgreSQL，再用 Eino 调用 Embedding API，批量保存向量并建立 pgvector HNSW 索引。
 
 ## 环境与运行
 
-需要 Go 1.22 或更高版本、Python 3、`pdfplumber 0.11.9` 和 Docker Compose；不需要 API Key。首次运行前安装锁定的 Python 依赖：
+开发和验收固定使用 Go 1.27.3、Python 3、`pdfplumber 0.11.9` 和 Docker Compose。M4 默认连接本机运行的 `Qwen/Qwen3-Embedding-0.6B`，回环地址不需要 API Key；远程兼容服务仍需通过 `EMBEDDING_API_KEY` 提供密钥。`go.mod` 固定工具链版本，已有 Go 安装且允许自动工具链下载时，项目命令会自动使用 Go 1.27.3；可通过 `go version` 确认。首次运行前安装锁定的 Python 依赖：
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -41,10 +41,12 @@ go build -o ./bin/ingest ./cmd/ingest
 go build -o ./bin/chunk ./cmd/chunk
 go build -o ./bin/migrate ./cmd/migrate
 go build -o ./bin/store ./cmd/store
+go build -o ./bin/index ./cmd/index
 ./bin/ingest --help
 ./bin/chunk --help
 ./bin/migrate --help
 ./bin/store --help
+./bin/index --help
 ```
 
 ## 参数
@@ -86,7 +88,7 @@ M2 本身不访问数据库，因此 Chunk JSON 不包含 `document_id`。M3 入
 
 ## PostgreSQL 持久化
 
-M3 使用 `pgvector/pgvector:0.8.7-pg17-bookworm` Docker 镜像。PostgreSQL 主版本为 17，`pgvector` 为 0.8.7；M3 只验证扩展可用，不保存 Embedding。
+使用 `pgvector/pgvector:0.8.7-pg17-bookworm` Docker 镜像。PostgreSQL 主版本为 17，`pgvector` 为 0.8.7；M3 登记文档与 Chunk，M4 通过新的迁移增加向量列和 HNSW 索引。
 
 启动数据库并执行迁移：
 
@@ -121,6 +123,72 @@ docker compose exec postgres \
 
 迁移是显式操作，入库命令不会自动修改 schema。`down` 只用于本地学习回退，必须同时传入 `--action down --confirm-down`。`db/migrations/` 中的 SQL 是追加式历史；后续里程碑只能新增文件，不修改、重命名、删除或压缩已有迁移。
 
+## Embedding 与向量索引
+
+已有数据库需要先运行 `migrate --action up`。`00003` 会清除旧模型生成的 1536 维向量并将向量列升级为 1024 维；M3 文档、Chunk 正文和元数据保持不变。
+
+先在本机启动提供 OpenAI 兼容 `/v1/embeddings` 接口的 Qwen 服务。例如 vLLM 使用 pooling runner：
+
+```bash
+vllm serve Qwen/Qwen3-Embedding-0.6B \
+  --runner pooling \
+  --host 127.0.0.1 \
+  --port 8001
+```
+
+vLLM 是独立的模型运行环境，不加入本项目的 PDF 解析依赖。服务就绪后，将 `store` 输出的文档 UUID 传给索引命令：
+
+```bash
+export EMBEDDING_BASE_URL='http://127.0.0.1:8001/v1'
+export EMBEDDING_MODEL='Qwen/Qwen3-Embedding-0.6B'
+go run ./cmd/index --document-id '<store 输出的 UUID>'
+```
+
+这两个环境变量可以省略，默认值如上。回环地址未设置 `EMBEDDING_API_KEY` 时，适配器仅在请求内使用 `local` 占位值；远程地址必须显式配置密钥。地址填写 API 基础路径（例如以 `/v1` 结尾），不含 `/embeddings`、凭据或查询参数。兼容服务必须支持数组输入、`dimensions: 1024`、浮点向量和每项 `index` 字段。`.env.example` 仅为配置示例，Go CLI 不会自动加载 `.env`，运行前需将所需变量导出到 shell。
+
+| 参数 | 含义 | 默认值 |
+| --- | --- | --- |
+| `--document-id` | 已入库文档的 UUID | 必填 |
+| `--batch-size` | 每批 Chunk 数，范围 1–2048 | 16 |
+| `--reindex` | 清空旧向量并整份重建 | false |
+
+输出包含文档 ID、`indexed/skipped`、状态、模型、总 Chunk 数、本次处理数和复用数。Embedding 只使用原始 Chunk 正文；Qwen 模型输出 1024 维向量，按余弦距离建立 HNSW 索引。Eino `v0.9.22`、OpenAI Embedding 适配器和 Sonic 的具体版本固定在 `go.mod/go.sum`，M4 尚不提供检索入口。
+
+成功批次单独提交；某批失败时保留已有向量，记录 `failed`、失败阶段和安全错误类别，再次执行相同命令即可续跑。进程异常退出可能留下 `embedding` 状态，重跑也会继续处理缺失向量。仅全部 Chunk 保存成功才标记 `ready`；已完成文档再次运行返回 `skipped`，不请求模型。
+
+单次请求超时 60 秒，临时网络错误及 HTTP 408/429/5xx 最多重试 3 次（共 4 次尝试）；退避可取消，`Retry-After` 最长等待 60 秒。认证、参数、无效响应不自动重试。按 Ctrl+C 会取消请求并尝试保存失败状态；若数据库断连，命令会明确报告状态保存失败，稍后重跑恢复。
+
+同一文档同时索引或在索引期间执行 `store --replace` 会返回“处理中”。替换成功会删除旧向量、清空模型配置并回到 `chunked`。更换服务地址或模型需要明确重建：
+
+```bash
+go run ./cmd/index --document-id '<UUID>' --reindex
+```
+
+每份文档仅保留一套向量，重建期间不处于 `ready`，重建失败也不会恢复旧向量。修改维度需要后续新迁移。批大小按 Chunk 个数计算，不按 Token 自动拆分；服务输入或 Token 限制错误时，可减小批大小，单个 Chunk 超出模型限制时需要回到切分阶段调整，程序不会截断条款。
+
+查询索引状态与完成数量：
+
+```bash
+docker compose exec postgres psql -U insurance -d insurance_agent -c \
+  'SELECT d.id, d.processing_status, d.embedding_model, d.failed_stage, d.last_error, d.indexed_at, d.total_chunks, count(c.embedding) AS embedded_chunks FROM documents d LEFT JOIN document_chunks c ON c.document_id = d.id GROUP BY d.id;'
+```
+
+执行一次 `migrate --action down --confirm-down` 只回退最新迁移。第一次会清除 Qwen 向量并恢复 00002 的 1536 维空向量列；第二次删除 M4 向量列和索引元数据，同时保留 M3 文档与 Chunk 正文；第三次才会删除 M3 表。
+
+## 测试
+
+常规测试用本地模拟 HTTP 服务验证 Eino 请求、响应校验与重试，不使用真实模型密钥。PostgreSQL 集成测试会清空测试数据并回放迁移，只能使用独立测试库：
+
+```bash
+docker compose exec postgres createdb -U insurance insurance_agent_m4_test
+export TEST_DATABASE_URL='postgres://insurance:insurance_dev@localhost:5432/insurance_agent_m4_test?sslmode=disable'
+go test ./...
+go test -race ./...
+go vet ./...
+```
+
+测试库名称必须包含 `test`；未设置 `TEST_DATABASE_URL` 时数据库测试会跳过。本地 Qwen 联调需单独启动模型、执行 `index` 并核对数据库向量数量，不能把模拟 HTTP 测试当成真实服务已验证。
+
 ## 输出与重复运行
 
 每次成功导入产生一个独立 JSON 文件，包含：
@@ -142,4 +210,4 @@ Go 负责校验、SHA-256、质量门槛和 JSON 落盘，内嵌 Python 脚本�
 
 M2 的章节识别是确定性启发式，不会使用 LLM 猜测标题或修复条款文字。PDF 若缺少明确条款编号、标题排版异常或表格阅读顺序复杂，可能只得到无条款编号的普通文本 Chunk；这类结果仍需对照原 PDF 人工抽查。固定的 800/100 参数用于建立首个可比较基线，后续质量优化阶段再比较其他策略。
 
-代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md) 和 [M3 学习说明](docs/learning/m3-postgresql-persistence.md)。
+代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md)、[M3 学习说明](docs/learning/m3-postgresql-persistence.md) 和 [M4 学习说明](docs/learning/m4-embedding-indexing.md)。

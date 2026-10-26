@@ -9,6 +9,7 @@ import (
 
 	"insurance_agent_demo/internal/catalog"
 	"insurance_agent_demo/internal/document"
+	"insurance_agent_demo/internal/indexing"
 )
 
 type Repository struct {
@@ -77,6 +78,13 @@ func (r Repository) Store(ctx context.Context, input document.ChunkedDocument, r
 			}, nil
 		}
 		outcome = catalog.OutcomeReplaced
+		var locked bool
+		if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(`+documentLockKey+`)`, documentID).Scan(&locked); err != nil {
+			return catalog.StoreResult{}, fmt.Errorf("获取文档替换锁: %w", err)
+		}
+		if !locked {
+			return catalog.StoreResult{}, indexing.ErrBusy
+		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE documents SET
 				name = $2,
@@ -92,6 +100,11 @@ func (r Repository) Store(ctx context.Context, input document.ChunkedDocument, r
 				processing_status = $12,
 				failed_stage = NULL,
 				last_error = NULL,
+				embedding_profile = NULL,
+				embedding_base_url = NULL,
+				embedding_model = NULL,
+				embedding_dimensions = NULL,
+				indexed_at = NULL,
 				chunked_at = $13,
 				updated_at = now()
 			WHERE id = $1`,
@@ -233,7 +246,8 @@ const documentSelect = `
 	SELECT id, product_id, name, version, source_url, source_file_path,
 		source_sha256, source_imported_at, source_parser, total_pages,
 		chunking_strategy, max_characters, overlap_characters, total_chunks,
-		processing_status, failed_stage, last_error, chunked_at, created_at, updated_at
+		processing_status, failed_stage, last_error, chunked_at, created_at, updated_at,
+		embedding_profile, embedding_base_url, embedding_model, embedding_dimensions, indexed_at
 	FROM documents`
 
 type rowScanner interface {
@@ -243,6 +257,9 @@ type rowScanner interface {
 func scanDocument(row rowScanner) (catalog.StoredDocument, error) {
 	var doc catalog.StoredDocument
 	var failedStage, lastError sql.NullString
+	var profile, baseURL, model sql.NullString
+	var dimensions sql.NullInt64
+	var indexedAt sql.NullTime
 	err := row.Scan(
 		&doc.ID, &doc.ProductID, &doc.Name, &doc.Version,
 		&doc.SourceURL, &doc.SourceFilePath, &doc.SourceSHA256,
@@ -251,12 +268,18 @@ func scanDocument(row rowScanner) (catalog.StoredDocument, error) {
 		&doc.Chunking.OverlapCharacters, &doc.TotalChunks,
 		&doc.ProcessingStatus, &failedStage, &lastError,
 		&doc.ChunkedAt, &doc.CreatedAt, &doc.UpdatedAt,
+		&profile, &baseURL, &model, &dimensions, &indexedAt,
 	)
 	if failedStage.Valid {
 		doc.FailedStage = failedStage.String
 	}
 	if lastError.Valid {
 		doc.LastError = lastError.String
+	}
+	doc.EmbeddingProfile, doc.EmbeddingBaseURL, doc.EmbeddingModel = profile.String, baseURL.String, model.String
+	doc.EmbeddingDimensions = int(dimensions.Int64)
+	if indexedAt.Valid {
+		doc.IndexedAt = &indexedAt.Time
 	}
 	return doc, err
 }

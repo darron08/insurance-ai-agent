@@ -4,6 +4,8 @@
 
 M3 把已经通过 M2 校验的 Chunk JSON 原子、幂等地写入 PostgreSQL。它不生成 Embedding，不执行检索，也不接入 Gin 或 Eino。
 
+本文解释 M3 的学习边界。当前项目已进入 M4，运行现有程序前应执行全部迁移；向量索引和升级后的工具链见 [M4 学习说明](m4-embedding-indexing.md)。
+
 ```text
 M2 Chunk JSON
   → 严格 JSON 读取
@@ -36,7 +38,7 @@ go run ./cmd/migrate --action up
 00001_m3_create_document_catalog.sql
 ```
 
-后续 M4 如果增加 `embedding` 列，必须新建 `00002_m4_....sql`，而不能回头修改 `00001`。这样可以：
+M4 增加 `embedding` 列时，新增了 `00002_m4_add_chunk_embeddings.sql`，没有回头修改 `00001`。这样可以：
 
 - 从空数据库重放项目的完整演进。
 - 看到每个里程碑对 schema 做了什么。
@@ -105,7 +107,7 @@ TEST_DATABASE_URL='postgres://insurance:insurance_dev@localhost:5432/insurance_a
   go test ./internal/postgres -run TestMigrationsAndRepository -v
 ```
 
-测试会回退并重放 M3 Migration，因此拒绝连接名称不含 `test` 的数据库。
+测试会逐版本回退并重放 M3/M4 Migration，因此拒绝连接名称不含 `test` 的数据库。当前第一次 `down` 回退 Qwen 的 1024 维迁移，第二次删除 M4 向量 schema，第三次才回退 M3。
 
 ## 动手实验
 

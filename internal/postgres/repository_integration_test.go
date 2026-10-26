@@ -164,6 +164,21 @@ func TestMigrationsAndRepository(t *testing.T) {
 	if err := RunMigrations(ctx, db, MigrationDown); err != nil {
 		t.Fatal(err)
 	}
+	// The first down reverts Qwen's 1024-dimensional migration to the original
+	// empty M4 schema. The second down removes M4 columns; M3 tables still live.
+	var preserved string
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.documents')::text`).Scan(&preserved); err != nil || preserved != "documents" {
+		t.Fatalf("documents after Qwen down = %q, error = %v", preserved, err)
+	}
+	if err := RunMigrations(ctx, db, MigrationDown); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.documents')::text`).Scan(&preserved); err != nil || preserved != "documents" {
+		t.Fatalf("M3 table after M4 down = %q, error = %v", preserved, err)
+	}
+	if err := RunMigrations(ctx, db, MigrationDown); err != nil {
+		t.Fatal(err)
+	}
 	var tableName sql.NullString
 	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.documents')`).Scan(&tableName); err != nil || tableName.Valid {
 		t.Fatalf("documents after down = %+v, error = %v", tableName, err)
