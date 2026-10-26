@@ -112,7 +112,7 @@ ORDER BY chunk_index;
 
 ## 验收与限制
 
-- 在 Go 1.27.3 下执行 `go test ./...`、`go test -race ./...`、`go vet ./...` 并构建五个 CLI。
+- 在 Go 1.27.3 下执行 `go test ./...`、`go test -race ./...`、`go vet ./...` 并构建当前全部 CLI。
 - 设置 `TEST_DATABASE_URL` 后验证 M3 升级保留原文、1536→1024 迁移、M4 回退保留 M3 表、完整迁移重放、批次回滚、并发锁和连接丢失。
 - M1/M2 的两份真实 PDF 回归继续运行；不要替换原夹具。
 - 本地模拟 HTTP 测试验证的是协议与工程行为，真实模型可用性和向量语义质量仍需独立验证。未配置真实密钥时，真实联调应标记为未验证。
@@ -124,9 +124,11 @@ ORDER BY chunk_index;
 
 ## 本次验证记录（2026-10-26）
 
-- Go 1.27.3 下全量 `go test ./...`、`go test -race ./...`、`go vet ./...` 通过，五个 CLI 构建成功。
+- Go 1.27.3 下全量 `go test ./...`、`go test -race ./...`、`go vet ./...` 通过，当时的五个 M1–M4 CLI 构建成功。
 - Docker 中的独立 `insurance_agent_m4_test` 数据库参与普通测试和竞态测试；覆盖真实迁移、HNSW、事务及锁，不是跳过数据库测试的结果。
 - 两份真实 PDF 的解析和切分回归均包含在全量测试中。
 - 自建三页 PDF 完整运行 `ingest → chunk → store → index`，本地模拟服务在第二批返回 401：首次保存 1 个 Chunk 后失败，重跑处理剩余 2 个并复用 1 个，再次运行跳过全部 3 个，显式重建重新处理全部 3 个。整个演示共发出 5 次模拟请求。
 - 演示记录位于忽略目录 `var/m4-smoke/result.json`；生成的页面和 Chunk JSON 也保存在 `var/m4-smoke/`，不进入 Git。
-- **Qwen 本地模型联调未验证**：本次自动化测试只使用本地模拟 HTTP 服务，没有下载模型权重或验证向量语义质量。
+- 2026-10-26 使用 Ollama 0.18.2 和真实 `qwen3-embedding:0.6b` 完成补充联调；其 OpenAI 兼容接口返回数组输入对应的 `index` 和 1024 维浮点向量。
+- 合成三页文档首次真实索引处理 3 个 Chunk 并进入 `ready`，重复运行处理 0 个并复用 3 个，显式 `--reindex` 再次处理全部 3 个；数据库中 3/3 向量维度均为 1024，HNSW 索引为 `vector_cosine_ops`。
+- 基本语义检查中，coverage 问题将 coverage Chunk 排在第一（余弦相似度约 0.725），exclusion 问题将 exclusion Chunk 排在第一（约 0.716）。这只确认模型和方向基本可用，不替代后续真实条款检索评测。

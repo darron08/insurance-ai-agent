@@ -136,6 +136,14 @@ vllm serve Qwen/Qwen3-Embedding-0.6B \
   --port 8001
 ```
 
+macOS 上也可以使用 Ollama。Ollama 的模型别名与 vLLM 默认模型名不同，因此索引时必须明确传入对应配置：
+
+```bash
+ollama pull qwen3-embedding:0.6b
+export EMBEDDING_BASE_URL='http://127.0.0.1:11434/v1'
+export EMBEDDING_MODEL='qwen3-embedding:0.6b'
+```
+
 vLLM 是独立的模型运行环境，不加入本项目的 PDF 解析依赖。服务就绪后，将 `store` 输出的文档 UUID 传给索引命令：
 
 ```bash
