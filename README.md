@@ -1,10 +1,10 @@
 # 通用保险 AI Agent
 
-当前完成 M2：先通过 Go 命令将本地文本型 PDF 解析为逐页 JSON，再用独立命令按章节和条款切成可检查的 Chunk JSON。
+当前完成 M3：先通过 Go 命令将本地文本型 PDF 解析为逐页 JSON，再按章节和条款切成可检查的 Chunk JSON，最后幂等写入 PostgreSQL。
 
 ## 环境与运行
 
-需要 Go 1.22 或更高版本、Python 3 和 `pdfplumber 0.11.9`；不需要 API Key。首次运行前安装锁定的 Python 依赖：
+需要 Go 1.22 或更高版本、Python 3、`pdfplumber 0.11.9` 和 Docker Compose；不需要 API Key。首次运行前安装锁定的 Python 依赖：
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -39,8 +39,12 @@ go test ./...
 go vet ./...
 go build -o ./bin/ingest ./cmd/ingest
 go build -o ./bin/chunk ./cmd/chunk
+go build -o ./bin/migrate ./cmd/migrate
+go build -o ./bin/store ./cmd/store
 ./bin/ingest --help
 ./bin/chunk --help
+./bin/migrate --help
+./bin/store --help
 ```
 
 ## 参数
@@ -78,7 +82,44 @@ Chunk JSON 顶层保留源文档元数据、SHA-256、解析器、页数、切�
 - 同一条款的 `part_index`、`part_count`。
 - `character_count` 和原文 `text`。
 
-M2 还没有数据库，因此不生成 `document_id`。每次成功切分产生独立结果文件；失败不会留下最终 JSON。
+M2 本身不访问数据库，因此 Chunk JSON 不包含 `document_id`。M3 入库成功后由 PostgreSQL 生成文档 ID。
+
+## PostgreSQL 持久化
+
+M3 使用 `pgvector/pgvector:0.8.7-pg17-bookworm` Docker 镜像。PostgreSQL 主版本为 17，`pgvector` 为 0.8.7；M3 只验证扩展可用，不保存 Embedding。
+
+启动数据库并执行迁移：
+
+```bash
+docker compose up -d postgres
+export DATABASE_URL='postgres://insurance:insurance_dev@localhost:5432/insurance_agent?sslmode=disable'
+go run ./cmd/migrate --action status
+go run ./cmd/migrate --action up
+```
+
+将 M2 生成的 Chunk JSON 写入 PostgreSQL：
+
+```bash
+go run ./cmd/store --input ./var/chunks/<切分命令输出的文件>.json
+```
+
+成功后输出 `document_id`、`inserted/skipped/replaced`、处理状态和 Chunk 数量。幂等键是 `product_id + version + source_sha256`：默认重复入库返回原文档 ID 且不改动数据；如需原子替换同一文档的 Chunk，显式执行：
+
+```bash
+go run ./cmd/store \
+  --input ./var/chunks/<切分命令输出的文件>.json \
+  --replace
+```
+
+可直接检查已入库数据：
+
+```bash
+docker compose exec postgres \
+  psql -U insurance -d insurance_agent \
+  -c 'SELECT id, product_id, version, processing_status, total_chunks FROM documents;'
+```
+
+迁移是显式操作，入库命令不会自动修改 schema。`down` 只用于本地学习回退，必须同时传入 `--action down --confirm-down`。`db/migrations/` 中的 SQL 是追加式历史；后续里程碑只能新增文件，不修改、重命名、删除或压缩已有迁移。
 
 ## 输出与重复运行
 
@@ -91,7 +132,7 @@ M2 还没有数据库，因此不生成 `document_id`。每次成功切分产生
 - `quality`：质量门槛结果、替换字符数、清理的私用区字符数、文本页和空白页数量。
 - `imported_at`、`parser`：UTC 导入时间、解析器及实际版本。
 
-先写临时文件、关闭成功后才改名为 `.json`，避免将不完整输出作为成功结果。重复导入保留原输出，同一文件的校验值一致，输出文件名和导入时间可以不同。M3 再加入基于数据库的查重和幂等状态；M1 没有 `document_id`、自动跳过或 `--reindex`。
+先写临时文件、关闭成功后才改名为 `.json`，避免将不完整输出作为成功结果。重复导入保留原输出，同一文件的校验值一致，输出文件名和导入时间可以不同。M3 在独立入库阶段生成 `document_id`并保证幂等；M1/M2 命令语义不变。
 
 ## 当前限制
 
@@ -101,4 +142,4 @@ Go 负责校验、SHA-256、质量门槛和 JSON 落盘，内嵌 Python 脚本�
 
 M2 的章节识别是确定性启发式，不会使用 LLM 猜测标题或修复条款文字。PDF 若缺少明确条款编号、标题排版异常或表格阅读顺序复杂，可能只得到无条款编号的普通文本 Chunk；这类结果仍需对照原 PDF 人工抽查。固定的 800/100 参数用于建立首个可比较基线，后续质量优化阶段再比较其他策略。
 
-代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md) 和 [M2 学习说明](docs/learning/m2-clause-chunking.md)。
+代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md) 和 [M3 学习说明](docs/learning/m3-postgresql-persistence.md)。

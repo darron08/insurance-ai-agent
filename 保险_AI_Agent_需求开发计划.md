@@ -1,9 +1,9 @@
 # 通用保险 AI Agent 需求开发计划
 
-> 文档版本：V1.0  
-> 更新日期：2026-10-25  
+> 文档版本：V1.1
+> 更新日期：2026-10-26
 > 当前重点：Phase 1 基础 RAG MVP  
-> 当前里程碑：M2 条款切分
+> 当前里程碑：M3 PostgreSQL 持久化
 > 项目性质：个人学习与工程能力验证 Demo
 
 ## 1. 项目概述
@@ -27,7 +27,7 @@
 - 文档解析与结构恢复
 - Chunking 策略设计
 - Embedding 与模型版本管理
-- Elasticsearch 向量检索与混合检索
+- PostgreSQL 全文、向量与混合检索
 - Eino Agent 与 Tool Calling
 - Session Memory 与受控长期记忆
 - RAG 和 Agent 自动化评测
@@ -61,16 +61,28 @@
 | Agent Framework | CloudWeGo Eino / Eino ADK |
 | LLM | OpenAI 或其他兼容模型 API |
 | Embedding | 现成 Embedding 模型 API |
-| 向量数据库 | Elasticsearch |
-| 关系数据库 | MySQL |
-| 缓存与 Session | Redis，按需要引入 |
-| 异步任务 | 初期使用简单 Worker，后续按需要引入 Kafka |
+| 唯一数据库 | PostgreSQL，同时承载关系数据、文档元数据、全文检索和向量检索 |
+| 向量检索 | PostgreSQL `pgvector` 扩展 |
+| 全文与模糊检索 | PostgreSQL Full Text Search；需要容错匹配时使用 `pg_trgm` |
+| 缓存与 Session | Phase 1 使用 PostgreSQL，不引入 Redis |
+| 异步任务 | Phase 1 使用进程内简单 Worker 和 PostgreSQL 任务状态，不引入消息队列 |
 | 文档解析 | Eino 生态组件和合适的第三方解析库 |
 | Evaluation | 自定义测试集加现有评测框架或工具 |
 | 前端 | React + TypeScript + Vite；使用原生 `fetch` 调用 RAG API，不承担文档管理 |
 | 部署 | Docker Compose |
 
-### 3.1 Eino 与自研代码的边界
+### 3.1 PostgreSQL 与 Docker 约定
+
+- Phase 1 的 PostgreSQL **使用 Docker**，由 Docker Compose 启动，不要求开发者在本机直接安装 PostgreSQL。
+- 镜像固定为 `pgvector/pgvector:0.8.7-pg17-bookworm`，即 PostgreSQL 17.x 与 pgvector 0.8.7，不使用 `latest` 标签。
+- Compose 为 PostgreSQL 配置持久化 volume、健康检查和本地端口；删除容器后默认不丢失 Demo 数据。
+- 数据库迁移显式执行 `CREATE EXTENSION IF NOT EXISTS vector`；如后续启用模糊匹配，再执行 `CREATE EXTENSION IF NOT EXISTS pg_trgm`。
+- 每个里程碑的 DDL 以新的带版本 SQL 保存在 `db/migrations/`；已应用的 Migration 不修改、重命名、删除或压缩。
+- Go CLI 和 API 在开发阶段可直接运行在主机，通过连接串访问 Docker 中的 PostgreSQL；M8 再提供包含 Go、Web 和 PostgreSQL 的完整 Compose 演示环境。
+- 这是 Demo 的固定数据方案：不同时引入 MySQL、Elasticsearch 或独立向量数据库。
+- Phase 2 的关键词、向量和混合检索仍在 PostgreSQL 内完成。除非未来明确修改项目范围，否则不将外部搜索引擎加入本 Demo 路线。
+
+### 3.2 Eino 与自研代码的边界
 
 优先复用 Eino：
 
@@ -97,8 +109,8 @@
   -> 文档解析
   -> 结构化切分
   -> Embedding
-  -> Elasticsearch 索引
-  -> MySQL 更新处理状态
+  -> PostgreSQL 保存 Chunk、向量和元数据
+  -> PostgreSQL 更新处理状态
 ```
 
 ### 4.2 RAG 问答
@@ -107,7 +119,7 @@
 用户问题
   -> 问题与过滤条件解析
   -> Query Embedding
-  -> Elasticsearch 检索
+  -> PostgreSQL pgvector 检索
   -> 上下文构造
   -> LLM 生成答案
   -> 引用映射与证据检查
@@ -137,7 +149,7 @@
 - 提取正文、标题、条款编号、页码或条款位置。
 - 实现结构优先 Chunking。
 - 批量调用 Embedding API。
-- 将 Chunk、向量和 Metadata 写入 Elasticsearch。
+- 将 Chunk、向量和 Metadata 写入 PostgreSQL。
 - 支持 Top K 向量检索。
 - 支持产品和文档版本过滤。
 - 基于检索证据生成回答。
@@ -155,7 +167,7 @@
 - PDF 在线上传、文档管理后台和可视化入库流程。
 - DOCX 等其他格式的导入作为后续增强，不纳入 Phase 1 硬性验收。
 - 复杂跨页表格恢复。
-- BM25 与向量的混合检索、RRF 和 Reranking。
+- PostgreSQL 全文检索与向量的混合检索、RRF 和 Reranking。
 - ReAct Agent 和多工具编排。
 - 真实保单、订单、支付或理赔系统接入。
 - 跨会话长期记忆和用户画像。
@@ -177,7 +189,7 @@
 | FR-02 | 解析文本型 PDF，保留页码、标题、条款编号和段落顺序 | P0 | 抽样内容可回溯到原文位置 |
 | FR-03 | 按章节与段落优先切分，超长内容再按长度切分 | P0 | 不拆散常规完整条款，Chunk 带完整元数据 |
 | FR-04 | 批量调用 Embedding，并记录模型、维度和状态 | P0 | 失败可重试，模型版本可追踪 |
-| FR-05 | 将 Chunk 和向量写入 Elasticsearch，支持产品和版本过滤 | P0 | 指定产品查询不会召回其他产品 |
+| FR-05 | 将 Chunk 和向量写入 PostgreSQL，支持产品和版本过滤 | P0 | 指定产品查询不会召回其他产品 |
 | FR-06 | 提供 Top K 向量检索接口，返回得分和来源 | P0 | 结果包含正文、位置和文档元数据 |
 | FR-07 | 根据证据生成答案，返回引用并在证据不足时拒答 | P0 | 回答关键结论可由引用直接支持 |
 | FR-08 | 记录问题、召回结果、模型响应、耗时、Token 和错误 | P0 | 一次请求可通过 `run_id` 追踪 |
@@ -196,8 +208,8 @@ Phase 1 不按一次性项目冲刺推进，而是拆成 8 个可独立运行、
 | --- | ---: | ---: | --- | --- |
 | M1 PDF 命令与解析 | 3 | 2 | 命令行参数、PDF 逐页解析、结构化输出 | 一条命令把一份文本型 PDF 转成带页码的 JSON |
 | M2 条款切分 | 3 | 2 | Chunking、条款边界和 Metadata | 将解析结果切成可检查的 Chunk JSON |
-| M3 文档状态与 MySQL | 3 | 2 | 数据模型、迁移、状态机和幂等 | 导入记录、处理状态和 Chunk 元数据可查询 |
-| M4 Embedding 与 ES 索引 | 4 | 2 | 向量、批处理、索引 Mapping 和重试 | PDF Chunk 可向量化并写入 Elasticsearch |
+| M3 PostgreSQL 持久化 | 3 | 2 | Docker Compose、数据模型、迁移、状态机和幂等 | 导入记录、处理状态和 Chunk 内容可查询 |
+| M4 Embedding 与 pgvector 索引 | 4 | 2 | 向量、批处理、PostgreSQL 向量索引和重试 | PDF Chunk 可向量化并写入 PostgreSQL |
 | M5 向量检索 | 3 | 2 | Query Embedding、Top K 和产品版本过滤 | 命令或调试 API 可返回相关条款及来源 |
 | M6 RAG 回答 | 4 | 2 | Prompt、上下文、引用、拒答和运行记录 | Ask API 能回答并返回引用或明确拒答 |
 | M7 React 对话页面 | 4 | 2 | React 状态、API 调用和问答交互 | 浏览器中可选择产品、提问并查看引用 |
@@ -227,16 +239,16 @@ Phase 1 不按一次性项目冲刺推进，而是拆成 8 个可独立运行、
 
 ### 7.3 阶段边界
 
-- M1 不接 MySQL、Elasticsearch、Embedding、LLM 或 React。
+- M1 不接 PostgreSQL、Embedding、LLM 或 React。
 - M2 只处理本地解析结果，不提前做向量检索。
-- M3 才引入数据库和处理状态。
-- M4 才引入模型 API 与 Elasticsearch。
+- M3 才通过 Docker Compose 引入 PostgreSQL、数据迁移和处理状态。
+- M4 才引入 Embedding 模型 API 与 `pgvector` 向量索引。
 - M6 后端问答稳定后，M7 才开始开发前端。
 - Agent、Memory、混合检索和生产优化仍属于 Phase 2 以后。
 
 ## 8. Phase 1 数据模型
 
-### 8.1 MySQL
+### 8.1 PostgreSQL 表
 
 #### insurance_products
 
@@ -268,6 +280,8 @@ Phase 1 不按一次性项目冲刺推进，而是拆成 8 个可独立运行、
 - `clause_id`
 - `section_title`
 - `page_number`
+- `text`
+- `embedding vector(n)`
 - `embedding_model`
 - `index_status`
 
@@ -301,19 +315,13 @@ Phase 1 不按一次性项目冲刺推进，而是拆成 8 个可独立运行、
 - `result`
 - `created_at`
 
-### 8.2 Elasticsearch Chunk 索引
+### 8.2 PostgreSQL 索引
 
-- `chunk_id`
-- `text`
-- `vector`
-- `product_id`
-- `document_id`
-- `document_version`
-- `clause_id`
-- `section_title`
-- `page_number`
-- `chunk_index`
-- `embedding_model`
+- 业务主键、外键和唯一约束保证产品、文档与 Chunk 的一致性。
+- B-tree 索引支持 `product_id`、`document_id`、版本和状态过滤。
+- `pgvector` HNSW 索引支持 Phase 1 的 Top K 语义检索。
+- 全文检索列与 GIN 索引在 Phase 2 混合检索时引入；向量结果与关键词结果在 SQL 中合并排序。
+- Chunk 正文、向量和 Metadata 保存在同一数据库，不维护另一份外部搜索索引。
 
 ## 9. Phase 1 录入命令与 API
 
@@ -378,7 +386,7 @@ go run ./cmd/ingest \
 
 交互约束：
 
-- 页面只调用后端 `/api/rag/ask` 和产品查询接口，不直接连接 Elasticsearch、MySQL 或模型服务。
+- 页面只调用后端 `/api/rag/ask` 和产品查询接口，不直接连接 PostgreSQL 或模型服务。
 - API 请求使用浏览器原生 `fetch`；组件内部状态使用 React Hooks 管理，Phase 1 不引入 Redux。
 - 引用卡片至少显示文档名称、版本、页码或条款编号，并展示支持答案的原文片段。
 - 发送期间避免重复提交；失败后保留原问题并允许重试。
@@ -419,11 +427,11 @@ go run ./cmd/ingest \
 
 ### 10.2 Phase 1 检索
 
-- 使用 Query Embedding 和 Elasticsearch 向量检索。
+- 使用 Query Embedding 和 PostgreSQL `pgvector` 向量检索。
 - 强制使用产品和文档版本过滤。
 - 返回 Top K Chunk、得分和来源元数据。
 - 保留检索调试接口，以便单独判断召回质量。
-- BM25、Hybrid Search、RRF 和 Reranking 放入 Phase 2。
+- PostgreSQL Full Text Search、Hybrid Search、RRF 和 Reranking 放入 Phase 2。
 
 ## 11. 回答与引用规则
 
@@ -494,7 +502,7 @@ go run ./cmd/ingest \
 | 可观测性 | 日志包含 `request_id`、`run_id`、`document_id`、配置版本、耗时、Token 和错误码 |
 | 可维护性 | 解析、切分、Embedding、检索和生成通过接口解耦；外部服务有适配层 |
 | 性能 | 批量处理 Embedding；限制上下文长度；先建立耗时和成本基线再优化 |
-| 可测试性 | Go 单元测试覆盖业务规则；集成测试覆盖 MySQL 和 Elasticsearch；固定评测集做质量回归 |
+| 可测试性 | Go 单元测试覆盖业务规则；集成测试覆盖 PostgreSQL 持久化、过滤和 `pgvector` 检索；固定评测集做质量回归 |
 | Prompt Injection | 文档内容只作为数据；系统指令和证据分隔；文档内容不能触发工具或越权操作 |
 
 ## 14. 风险与应对
@@ -513,7 +521,7 @@ go run ./cmd/ingest \
 
 | 阶段 | 目标 | 新增能力 | 启动条件 |
 | --- | --- | --- | --- |
-| Phase 2 RAG 质量优化 | 让检索方案可比较 | Fixed、Recursive、Clause-aware 对比；BM25、Vector、Hybrid；Reranking；版本更新 | Phase 1 评测集和错误分类稳定 |
+| Phase 2 RAG 质量优化 | 让检索方案可比较 | Fixed、Recursive、Clause-aware 对比；PostgreSQL Full Text Search、Vector、Hybrid；RRF 与 Reranking；版本更新 | Phase 1 评测集和错误分类稳定 |
 | Phase 3 AI Agent | 从问答升级为工具助理 | Eino Agent、Tool Calling、多步骤查询、条款比较、只读业务工具 | RAG 能作为稳定工具调用 |
 | Phase 4 Memory | 支持多轮和跨会话 | Session History、摘要、Context 管理、受控长期记忆和删除 | 会话隔离和隐私策略明确 |
 | Phase 5 Agent Evaluation | 客观比较 Agent 版本 | 工具选择、参数、轨迹、任务成功率、记忆、安全和回归测试 | Agent 工具和任务边界稳定 |
@@ -529,7 +537,7 @@ go run ./cmd/ingest \
 
 ### 16.2 本阶段不做
 
-- 不接 MySQL、Elasticsearch 或 Redis。
+- 不接 PostgreSQL 或其他外部数据服务。
 - 不调用 Embedding 或 LLM。
 - 不做 Chunking 和条款语义识别。
 - 不开发 HTTP API 或 React 页面。
@@ -631,7 +639,7 @@ go run ./cmd/ingest \
 - 重复处理约定：M1 每次产生独立输出；重复文件的校验值相同。第 9 节的查重跳过、文档状态和重新索引是完整 Phase 1 目标，在后续里程碑实现。
 - 下一步：先阅读 M1 代码并完成动手实验，复盘后再进入 M2。
 
-## 17. 当前执行计划：M2 条款切分
+## 17. 已完成执行计划：M2 条款切分
 
 ### 17.1 阶段目标
 
@@ -671,7 +679,55 @@ ingest CLI
 
 M2 暂不改变 `ingest` 命令。事务状态、失败重试和阶段恢复在 M3/M4 随持久化能力一起设计。
 
-## 18. Phase 1 最终交付物
+## 18. 当前执行计划：M3 PostgreSQL 持久化
+
+### 18.1 阶段目标
+
+读取 M2 Chunk JSON，在连接数据库前重新验证完整契约，再将产品、文档和 Chunk 作为一个事务幂等写入 PostgreSQL。
+
+M3 保留 M1/M2 文件命令作为可检查入口，新增独立 `store` 命令；不改造已稳定的 `ingest` 或 `chunk` 语义。
+
+### 18.2 固定技术选择
+
+- Docker 镜像：`pgvector/pgvector:0.8.7-pg17-bookworm`。
+- Go 版本：1.22。
+- PostgreSQL Driver：`pgx/v5 v5.7.2`，通过 `database/sql` 使用连接池。
+- Migration：Goose v3.19.1 和内嵌的版本化 SQL。
+- 幂等键：`product_id + version + source_sha256`。
+- 文档状态：`chunked`、`embedding`、`ready` 和 `failed`；M3 只写入 `chunked`。
+
+### 18.3 Migration 规则
+
+- M3 新增 `00001_m3_create_document_catalog.sql`，包含 Goose `Up` 和 `Down`。
+- Migration SQL 是数据库演进的权威历史；后续里程碑只追加新文件。
+- `Up` 是正式升级路径；`Down` 只允许在本地显式确认后执行。
+- 集成测试必须能从空数据库按顺序重放所有 Migration。
+
+### 18.4 代码边界
+
+- Catalog Service 负责 M2 契约校验和应用流程，只依赖 Repository 接口。
+- PostgreSQL Adapter 封装 SQL、事务、唯一约束和重复键处理。
+- CLI 只负责参数、JSON 读取、连接组装和结果输出。
+- 后续 Gin Handler 调用 Catalog Service，Eino Retriever 依赖独立 Chunk 检索接口；M3 不引入 Gin 或 Eino 依赖。
+
+### 18.5 幂等与事务语义
+
+- 首次写入返回 `inserted` 和新的 PostgreSQL UUID。
+- 默认重复写入返回 `skipped` 和原文档 ID，不修改数据。
+- `--replace` 在同一事务内更新文档、删除旧 Chunk、写入新 Chunk 并将状态重置为 `chunked`。
+- 任何 Chunk 写入失败都回滚整个事务，不留下半成品文档。
+
+### 18.6 验收清单
+
+- Docker Compose 能启动带持久化 volume 和健康检查的 PostgreSQL。
+- `migrate` 命令支持 `up`、`status` 和显式确认的 `down`。
+- `store` 命令能返回文档 ID、结果、状态和 Chunk 数量。
+- 首次、重复、替换、回滚、外键、唯一约束和级联删除均有测试。
+- 从空测试数据库执行 `up → down → up` 可完整重放 M3 DDL。
+- `go test ./...`、`go test -race ./...` 和 `go vet ./...` 通过。
+- README 和 M3 学习文档说明环境、迁移、入库、查询、幂等与限制。
+
+## 19. Phase 1 最终交付物
 
 - 可运行的 Go 项目。
 - Docker Compose 本地环境。
@@ -680,7 +736,7 @@ M2 暂不改变 `ingest` 命令。事务状态、失败重试和阶段恢复在 
 - 文档清单、来源和授权记录。
 - 文档解析与结构化中间结果。
 - Chunking、Embedding、索引和检索模块。
-- MySQL 迁移脚本和 Elasticsearch Mapping。
+- PostgreSQL 迁移脚本、`pgvector` 索引和 Docker Compose 配置。
 - 产品查询、文档状态、检索、问答和评测 API。
 - 答案引用和证据不足拒答机制。
 - 不少于 30 条人工核实评测样本。
@@ -688,7 +744,7 @@ M2 暂不改变 `ingest` 命令。事务状态、失败重试和阶段恢复在 
 - 错误分类和已知限制清单。
 - 运行说明和可重复演示脚本。
 
-## 19. 项目边界声明
+## 20. 项目边界声明
 
 1. 本项目仅用于学习、技术验证和作品展示，不代表任何保险机构的官方产品。
 2. 只使用公开、合法取得或已明确获授权的保险资料。
@@ -699,7 +755,7 @@ M2 暂不改变 `ingest` 命令。事务状态、失败重试和阶段恢复在 
 7. 不提供正式核保、核赔、保险资格或赔付决定。
 8. 面向真实用户开放前，需要完成准确性、隐私、安全、权限和合规评估。
 
-## 19. 待确认事项
+## 21. 待确认事项
 
 以下事项应在对应迭代开始前确认：
 
