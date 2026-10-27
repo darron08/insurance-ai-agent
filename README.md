@@ -1,6 +1,6 @@
 # 通用保险 AI Agent
 
-当前完成 M4：通过 Go 命令将本地文本型 PDF 解析、切分、幂等写入 PostgreSQL，再用 Eino 调用 Embedding API，批量保存向量并建立 pgvector HNSW 索引。
+当前完成 M5：通过 Go 命令将本地文本型 PDF 解析、切分、幂等写入 PostgreSQL，用 Eino 调用 Embedding API 建立向量索引，再按产品和版本检索相关条款与来源。默认 HNSW，提供 exact 精确检索对照。
 
 ## 环境与运行
 
@@ -42,11 +42,13 @@ go build -o ./bin/chunk ./cmd/chunk
 go build -o ./bin/migrate ./cmd/migrate
 go build -o ./bin/store ./cmd/store
 go build -o ./bin/index ./cmd/index
+go build -o ./bin/search ./cmd/search
 ./bin/ingest --help
 ./bin/chunk --help
 ./bin/migrate --help
 ./bin/store --help
 ./bin/index --help
+./bin/search --help
 ```
 
 ## 参数
@@ -55,6 +57,7 @@ go build -o ./bin/index ./cmd/index
 | --- | --- | --- |
 | `--file` | 本地 PDF 路径 | 必填，普通文件且具有 PDF 文件头 |
 | `--product-id` | 产品标识 | 必填 |
+| `--version` | 文档版本 | 可选，默认空字符串；不允许首尾空白 |
 | `--document-name` | 文档名称 | 可选；未传时使用 PDF 文件名并去掉 `.pdf` 后缀 |
 | `--source-url` | 文档来源地址 | 可选；未传时记录为 `local://文件名`，填写时需为 HTTP/HTTPS URL；只记录，不请求 |
 | `--output` | 输出目录 | 默认 `./var/imports` |
@@ -160,7 +163,7 @@ go run ./cmd/index --document-id '<store 输出的 UUID>'
 | `--batch-size` | 每批 Chunk 数，范围 1–2048 | 16 |
 | `--reindex` | 清空旧向量并整份重建 | false |
 
-输出包含文档 ID、`indexed/skipped`、状态、模型、总 Chunk 数、本次处理数和复用数。Embedding 只使用原始 Chunk 正文；Qwen 模型输出 1024 维向量，按余弦距离建立 HNSW 索引。Eino `v0.9.22`、OpenAI Embedding 适配器和 Sonic 的具体版本固定在 `go.mod/go.sum`，M4 尚不提供检索入口。
+输出包含文档 ID、`indexed/skipped`、状态、模型、总 Chunk 数、本次处理数和复用数。文档 Embedding 只使用原始 Chunk 正文；Qwen 模型输出 1024 维向量，按余弦距离建立 HNSW 索引。Eino `v0.9.22`、OpenAI Embedding 适配器和 Sonic 的具体版本固定在 `go.mod/go.sum`；M5 通过下述独立 `search` 命令使用已有向量。
 
 成功批次单独提交；某批失败时保留已有向量，记录 `failed`、失败阶段和安全错误类别，再次执行相同命令即可续跑。进程异常退出可能留下 `embedding` 状态，重跑也会继续处理缺失向量。仅全部 Chunk 保存成功才标记 `ready`；已完成文档再次运行返回 `skipped`，不请求模型。
 
@@ -183,13 +186,44 @@ docker compose exec postgres psql -U insurance -d insurance_agent -c \
 
 执行一次 `migrate --action down --confirm-down` 只回退最新迁移。第一次会清除 Qwen 向量并恢复 00002 的 1536 维空向量列；第二次删除 M4 向量列和索引元数据，同时保留 M3 文档与 Chunk 正文；第三次才会删除 M3 表。
 
+## 产品内向量检索（M5）
+
+先运行 `ingest → chunk → store → index`，再使用与索引时完全一致的 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL` 和 1024 维配置运行：
+
+```bash
+go run ./cmd/search \
+  --product-id demo \
+  --query '等待期内发生保险事故如何处理？' \
+  --top-k 5 \
+  --mode hnsw
+
+# 搜索旧的空版本：显式空参数与省略参数不同
+go run ./cmd/search --product-id demo --version='' --query '保险责任有哪些？' --mode exact
+```
+
+| 参数 | 含义 | 默认值 |
+| --- | --- | --- |
+| `--product-id` | 精确匹配一个产品，不能包含首尾空白 | 必填 |
+| `--query` | 问题，去掉首尾空白后不能为空 | 必填 |
+| `--version` | 精确匹配版本；显式空值匹配旧数据的空版本 | 省略时自动选择唯一 ready 版本；存在多个则提示选择 |
+| `--top-k` | 返回数量上限，1–100 | 5 |
+| `--mode` | `hnsw` 或 `exact` | `hnsw` |
+
+新文档可通过 `ingest --version v1` 录入版本，后续命令原样传递；省略仍保留空版本。版本是文档的标签，不自动比较大小或推断最新版。`ready` 以外的文档不参与版本选择和检索；所选版本只要有 ready 文档的 Embedding 配置不兼容，整次检索就失败，避免静默漏搜。即使 vLLM 与 Ollama 背后是同一模型，只要地址或模型别名不同，也必须使用索引时配置或显式重建。
+
+stdout 仅输出格式化 JSON：`query`、`product_id`、实际 `version`、`mode`、`model`、`embedding_profile`、`query_template`、`top_k`、`hits`。命中含 Chunk/文档 ID、产品、名称、版本、来源 URL、源文件 SHA-256、物理页码、条款/章节/分片、完整原文、`distance` 和 `score`。错误在 stderr，退出码沿用 0/1/2。不存在 ready 文档、版本歧义或模型不兼容会明确失败；有 ready 文档但没有合格向量时返回 `hits: []`，不修改索引状态。
+
+Query Embedding 固定使用 `qwen3-insurance-v1` 检索指令模板，文档 Embedding 保留原文，因此无需重建 M4 向量。本阶段按 Qwen 模型设计；切换其他模型前需核对其查询输入格式，不能仅凭相同维度认定兼容。复用 M4 的重试、60 秒单次模型请求超时与 Ctrl+C 取消行为；模型调用结束后才启动最长 10 秒的只读可重复读检索事务。
+
+`score = 1 - 余弦距离`，不是概率或置信度。M5 不设最低分，不生成答案，也不根据低分认定没有证据。`hnsw` 使用迭代扫描改善过滤后的召回，可能不足 K 条，不自动切换 exact；小数据集允许数据库选择精确执行路径，JSON 的 `mode` 表示请求策略。`exact` 先物化所有符合过滤条件的候选再排序，用于建立精确 Top K 基线。详细原理、复盘实验与真实联调记录见 [M5 学习说明](docs/learning/m5-vector-retrieval.md)。
+
 ## 测试
 
 常规测试用本地模拟 HTTP 服务验证 Eino 请求、响应校验与重试，不使用真实模型密钥。PostgreSQL 集成测试会清空测试数据并回放迁移，只能使用独立测试库：
 
 ```bash
-docker compose exec postgres createdb -U insurance insurance_agent_m4_test
-export TEST_DATABASE_URL='postgres://insurance:insurance_dev@localhost:5432/insurance_agent_m4_test?sslmode=disable'
+docker compose exec postgres createdb -U insurance insurance_agent_m5_test
+export TEST_DATABASE_URL='postgres://insurance:insurance_dev@localhost:5432/insurance_agent_m5_test?sslmode=disable'
 go test ./...
 go test -race ./...
 go vet ./...
@@ -201,7 +235,7 @@ go vet ./...
 
 每次成功导入产生一个独立 JSON 文件，包含：
 
-- `metadata`：产品、名称、来源；`version` 字段当前留空，后续文档版本管理阶段再启用。
+- `metadata`：产品、名称、来源与 `version`；版本由 `ingest --version` 提供，省略时为空字符串。
 - `file_path`、`sha256`：绝对文件路径、文件内容的校验值。
 - `total_pages`、`character_count`：总页数、提取并去掉页面首尾空白后的 Unicode 码点数。
 - `pages`：`page_number` 从 1 开始，包括空白页；`text` 为页面文本。
@@ -218,4 +252,4 @@ Go 负责校验、SHA-256、质量门槛和 JSON 落盘，内嵌 Python 脚本�
 
 M2 的章节识别是确定性启发式，不会使用 LLM 猜测标题或修复条款文字。PDF 若缺少明确条款编号、标题排版异常或表格阅读顺序复杂，可能只得到无条款编号的普通文本 Chunk；这类结果仍需对照原 PDF 人工抽查。固定的 800/100 参数用于建立首个可比较基线，后续质量优化阶段再比较其他策略。
 
-代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md)、[M3 学习说明](docs/learning/m3-postgresql-persistence.md) 和 [M4 学习说明](docs/learning/m4-embedding-indexing.md)。
+代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md)、[M3 学习说明](docs/learning/m3-postgresql-persistence.md)、[M4 学习说明](docs/learning/m4-embedding-indexing.md) 和 [M5 学习说明](docs/learning/m5-vector-retrieval.md)。

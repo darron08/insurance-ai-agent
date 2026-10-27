@@ -18,6 +18,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var req ingest.Request
 	flags.StringVar(&req.File, "file", "", "本地文本型 PDF 路径（必填）")
 	flags.StringVar(&req.Metadata.ProductID, "product-id", "", "产品标识（必填）")
+	flags.StringVar(&req.Metadata.Version, "version", "", "文档版本（可选，默认空版本）")
 	flags.StringVar(&req.Metadata.Name, "document-name", "", "文档名称（可选，默认使用 PDF 文件名）")
 	flags.StringVar(&req.Metadata.SourceURL, "source-url", "", "资料来源 HTTP/HTTPS URL（可选，默认本地来源）")
 	flags.StringVar(&req.OutputDir, "output", "./var/imports", "JSON 输出目录")

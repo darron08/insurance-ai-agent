@@ -26,6 +26,9 @@ type Request struct {
 type Service struct{ Parser parser.Parser }
 
 func (s Service) Run(req Request) (doc document.Document, output string, err error) {
+	if req.Metadata.Version != strings.TrimSpace(req.Metadata.Version) {
+		return doc, "", fmt.Errorf("version 不能包含首尾空白")
+	}
 	for _, field := range []struct{ name, value string }{
 		{"file", req.File}, {"output", req.OutputDir}, {"product-id", req.Metadata.ProductID},
 	} {

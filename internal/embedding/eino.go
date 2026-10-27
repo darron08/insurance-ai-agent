@@ -74,6 +74,21 @@ func waitContext(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+// EmbedQuery uses Qwen's asymmetric retrieval format. Document Embed calls keep
+// their original text, so adding this query instruction does not invalidate M4 vectors.
+func (e *Embedder) EmbedQuery(ctx context.Context, query string) ([]float64, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, errors.New("Query Embedding 问题不能为空")
+	}
+	text := "Instruct: Retrieve insurance policy clauses relevant to the user's question.\nQuery:" + query
+	vectors, err := e.Embed(ctx, []string{text})
+	if err != nil {
+		return nil, err
+	}
+	return vectors[0], nil
+}
+
 func (e *Embedder) Embed(ctx context.Context, texts []string) ([][]float64, error) {
 	if len(texts) == 0 || len(texts) > 2048 {
 		return nil, errors.New("Embedding 输入数量必须在 1 到 2048 之间")

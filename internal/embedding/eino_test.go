@@ -68,6 +68,52 @@ func TestEinoRequestAndResponseOrder(t *testing.T) {
 	}
 }
 
+func TestQueryInstructionAndDocumentText(t *testing.T) {
+	var inputs [][]string
+	e := newTestEmbedder(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input []string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		inputs = append(inputs, body.Input)
+		success(w, row(0, 1))
+	})
+	if v, err := e.EmbedQuery(context.Background(), " 等待期？ "); err != nil || len(v) != indexing.Dimensions {
+		t.Fatalf("vector=%v err=%v", v, err)
+	}
+	if _, err := e.Embed(context.Background(), []string{"原始条款正文"}); err != nil {
+		t.Fatal(err)
+	}
+	want := "Instruct: Retrieve insurance policy clauses relevant to the user's question.\nQuery:等待期？"
+	if len(inputs) != 2 || len(inputs[0]) != 1 || inputs[0][0] != want || inputs[1][0] != "原始条款正文" {
+		t.Fatalf("inputs=%q", inputs)
+	}
+	if _, err := e.EmbedQuery(context.Background(), " \n "); err == nil || len(inputs) != 2 {
+		t.Fatal("empty query reached API")
+	}
+}
+
+func TestQueryRetryAndCancellation(t *testing.T) {
+	var calls atomic.Int32
+	e := newTestEmbedder(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(429)
+			return
+		}
+		success(w, row(0, 1))
+	})
+	if _, err := e.EmbedQuery(context.Background(), "问题"); err != nil || calls.Load() != 2 {
+		t.Fatalf("calls=%d err=%v", calls.Load(), err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := e.EmbedQuery(ctx, "问题"); !errors.Is(err, context.Canceled) || calls.Load() != 2 {
+		t.Fatalf("calls=%d err=%v", calls.Load(), err)
+	}
+}
+
 func TestLocalServiceDoesNotRequireAPIKey(t *testing.T) {
 	p, err := indexing.NewProfile("http://localhost:8000/v1", "")
 	if err != nil {
