@@ -5,17 +5,17 @@ M5 的输入是问题、一个产品和可选版本，输出是相关 Chunk 原�
 ## 调用链与边界
 
 ```mermaid
-flowchart TD
-    CLI[search CLI：参数与环境配置] --> Service[retrieval.Service.Search]
-    Service --> Adapter[embedding.EmbedQuery：Qwen 问题指令]
-    Adapter --> Eino[Eino OpenAI Embedding]
-    Eino --> Validate[1024 维、非零、有限数值校验]
-    Validate --> Repository[PostgreSQL SearchRepository]
-    Repository --> Snapshot[10 秒只读可重复读事务]
-    Snapshot --> Scope[解析 ready 版本并核对完整模型配置]
-    Scope --> HNSW[HNSW 候选 Top K]
-    Scope --> Exact[物化符合条件的全部候选，再精确 Top K]
-    HNSW --> Result[原文、来源、物理页码与分数]
+graph TD
+    CLI["search CLI：参数与环境配置"] --> Service["retrieval.Service.Search"]
+    Service --> Adapter["embedding.EmbedQuery：Qwen 问题指令"]
+    Adapter --> Eino["Eino OpenAI Embedding"]
+    Eino --> Validate["1024 维、非零、有限数值校验"]
+    Validate --> Repository["PostgreSQL SearchRepository"]
+    Repository --> Snapshot["10 秒只读可重复读事务"]
+    Snapshot --> Scope["解析 ready 版本并核对完整模型配置"]
+    Scope --> HNSW["HNSW 候选 Top K"]
+    Scope --> Exact["物化符合条件的全部候选，再精确 Top K"]
+    HNSW --> Result["原文、来源、物理页码与分数"]
     Exact --> Result
 ```
 
