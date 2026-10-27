@@ -4,7 +4,7 @@
 
 This repository is a learning-oriented insurance AI agent built in small, reviewable milestones.
 Keep each change scoped to the active milestone and preserve code readability for study.
-The current milestone is M6: evidence-grounded, non-streaming insurance answers over M5 retrieval, with validated citations, abstention, HTTP APIs, and persistent run snapshots.
+The current milestone is M7: a local React chat page over M6 APIs, with product/version discovery, expandable source evidence, and same-origin Go static hosting.
 
 ## Architecture boundaries
 
@@ -13,7 +13,8 @@ The current milestone is M6: evidence-grounded, non-streaming insurance answers 
 - Keep third-party parser details behind `internal/parser.Parser`.
 - Keep PostgreSQL details behind the catalog, indexing, retrieval, and RAG run repository boundaries so handlers and workers can reuse application services.
 - Keep Eino types inside the Embedding and generation adapters; application services use project-owned interfaces and context.Context.
-- M6 reuses M5 retrieval and adds Eino generation and a minimal Gin API. Do not add Graph, Agent, Memory, Redis, Elasticsearch, reranking, hybrid search, streaming, or React work to M6.
+- M7 reuses M6 answers and adds React/TypeScript/Vite plus a read-only product/version directory. Keep SQL in repositories and frontend state in React; the browser only calls the Go API. Do not add Graph, Agent, Memory, Redis, Elasticsearch, reranking, hybrid search, streaming, login, or document-management UI to M7.
+- Page messages live in memory and disappear on refresh; backend run snapshots persist. Every question is independent. Preserve explicit empty versions, cancel pending fetches and ignore late responses, render answers/evidence as text, and allow only HTTP/HTTPS source links.
 - M6 uses DeepSeek Flash JSON output with thinking disabled. Validate every citation against the actual evidence snapshot; similarity is never an answerability threshold. Partially supported questions require whole-question abstention.
 - Persist run evidence and source snapshots independently of live Chunk rows. Keep all model requests outside database transactions and never persist API keys or provider reasoning content.
 - M4/M5 default to locally served `Qwen/Qwen3-Embedding-0.6B` with 1024-dimensional vectors through an OpenAI-compatible endpoint.
@@ -55,6 +56,8 @@ go vet ./...
 
 PostgreSQL integration tests require a Docker-backed test database whose name contains `test` and a `TEST_DATABASE_URL` connection string. They truncate data and replay migrations; never point them at the demo database. Embedding unit tests use local HTTP servers, never live API credentials.
 
+M7 frontend uses Node 24 and npm with fixed direct versions and a committed lockfile. From `web/`, run `npm ci`, `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:e2e` (install Chromium once with `npx playwright install chromium`). Automatic browser tests mock all model calls. `npm run test:live` is an explicit manual acceptance command that calls the real local service.
+
 For parser or concurrency changes, also run `go test -race ./...`.
 Parser changes must pass the two real-policy regression tests in `internal/parser/pdf_test.go`.
 Chunker changes must pass the two real-policy regression tests in `internal/chunker/chunker_test.go`.
@@ -64,5 +67,6 @@ Chunker changes must pass the two real-policy regression tests in `internal/chun
 - Treat existing uncommitted changes as user work and preserve them.
 - Generated imports belong under `var/` and must not be committed.
 - Build output belongs under `bin/` and must not be committed.
+- Frontend source belongs under `web/`; build output is `bin/web/`, and `web/node_modules/` and browser test outputs must not be committed.
 - Keep documentation consistent with behavior when commands, dependencies, or JSON fields change.
 - Do not create a Git commit unless the user explicitly requests one.

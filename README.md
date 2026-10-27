@@ -1,6 +1,6 @@
 # 通用保险 AI Agent
 
-当前完成 M6：在 M5 产品与版本检索基础上，通过 Eino 调用 DeepSeek Flash 生成带引用的保险条款解释或明确拒答，并保存可复盘的运行快照。提供最小非流式 HTTP API；M1–M5 的独立命令继续可用。固定12个真实联调样本通过，范围与限制见 M6 学习说明。
+当前完成 M7：在本地浏览器选择产品和版本、提问，并展开回答引用核对原文。React 页面调用 M6 的非流式问答 API，后台保存可复盘的运行记录；刷新页面清空当前对话，每次提问独立。M1–M6 的命令与 API 继续可用。
 
 ## 环境与运行
 
@@ -252,7 +252,7 @@ Go 负责校验、SHA-256、质量门槛和 JSON 落盘，内嵌 Python 脚本�
 
 M2 的章节识别是确定性启发式，不会使用 LLM 猜测标题或修复条款文字。PDF 若缺少明确条款编号、标题排版异常或表格阅读顺序复杂，可能只得到无条款编号的普通文本 Chunk；这类结果仍需对照原 PDF 人工抽查。固定的 800/100 参数用于建立首个可比较基线，后续质量优化阶段再比较其他策略。
 
-代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md)、[M3 学习说明](docs/learning/m3-postgresql-persistence.md)、[M4 学习说明](docs/learning/m4-embedding-indexing.md)、[M5 学习说明](docs/learning/m5-vector-retrieval.md) 和 [M6 学习说明](docs/learning/m6-evidence-grounded-answers.md)。
+代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md)、[M3 学习说明](docs/learning/m3-postgresql-persistence.md)、[M4 学习说明](docs/learning/m4-embedding-indexing.md)、[M5 学习说明](docs/learning/m5-vector-retrieval.md)、[M6 学习说明](docs/learning/m6-evidence-grounded-answers.md) 和 [M7 学习说明](docs/learning/m7-local-chat.md)。
 
 ## 基于证据的问答 API（M6）
 
@@ -285,3 +285,51 @@ Ask 返回 `run_id`、实际 `version`、`answer`、`citations`、`abstained`、
 证据只支持问题的一部分时整题拒答；资料冲突返回冲突双方的引用，正式核保或核赔请求提示联系正式渠道。相似度不是拒答阈值，引用校验也不证明语义推理正确。服务默认本机监听，无登录与公开部署保护；运行详情含问题、公开/授权证据和模型最终内容，仅用于本地复盘。`running` 表示尚无最终结果，也可能是进程中断遗留，M6 不自动恢复。
 
 自动化测试与手动真实联调的命令、完整 JSON 契约和验收记录见 [M6 学习说明](docs/learning/m6-evidence-grounded-answers.md)。
+
+## 本地浏览器问答（M7）
+
+继续使用本机 Docker PostgreSQL。`DATABASE_URL` 指向日常使用的数据库；`TEST_DATABASE_URL` 仅供会清空数据的集成测试使用。应用不会自动加载 `.env`，也不会自动迁移数据库。
+
+日常启动：先按 M6 配置模型密钥和与现有索引一致的 `EMBEDDING_*`，再执行：
+
+```bash
+# 使用 Node 24；前端安装只需首次执行或锁文件变化后执行
+npm --prefix web ci
+npm --prefix web run build
+go run ./cmd/migrate --action up
+go run ./cmd/api --web-dir ./bin/web
+```
+
+打开 [本地问答页面](http://127.0.0.1:8080)。未传 `--web-dir` 时仍只提供 API；显式传入的目录必须包含已构建的 `index.html`。产品目录来自数据库中所有 ready 文档，名称缺失时显示产品 ID；不兼容版本禁用，多个可用版本必须手动选择。未标注版本仍发送 `"version":""`。
+
+本机已有索引使用 Ollama 别名时，配置必须与入库值一致，例如：
+
+```bash
+export EMBEDDING_BASE_URL='http://127.0.0.1:11434/v1'
+export EMBEDDING_MODEL='qwen3-embedding:0.6b'
+```
+
+这不是改变默认模型，只是沿用该批索引记录的服务地址和别名。模型服务仍需正在运行。若页面显示没有可用产品，依次使用本文的 `ingest`、`chunk`、`store`、`index` 命令完成导入与索引；只导入或切分还不会出现在问答目录。
+
+开发时在两个终端分别启动 Go 和 Vite：
+
+```bash
+go run ./cmd/api
+# 另一终端，继承同一套后端配置；前端不需要模型密钥
+npm --prefix web run dev
+```
+
+打开 [开发页面](http://127.0.0.1:5173)，`/api` 由 Vite 代理至 `127.0.0.1:8080`。所有前端请求使用相对地址，日常构建由 Go 同源提供，无需开放 CORS。
+
+新增 `GET /api/rag/products`，返回 `{"products":[{"product_id":"...","name":null,"versions":[{"version":"","document_count":1,"compatible":true}]}]}`。目录只辅助选择，真正提问时仍重新校验产品、版本和索引配置；返回 404/409 时页面会提示刷新目录，不会自动更换版本或重复提问。
+
+页面支持引用原文与完整 Chunk 展开、运行信息、停止等待及清空对话。停止等待不承诺回滚已经产生的后台记录；刷新和清空对话均不删除数据库记录。没有多轮上下文理解，后续问题仍需写全产品条款相关信息。
+
+```bash
+npm --prefix web run typecheck
+npm --prefix web test
+npx --prefix web playwright install chromium
+npm --prefix web run test:e2e
+```
+
+测试及真实联调方法、阅读顺序和已知限制见 [M7 学习说明](docs/learning/m7-local-chat.md)。

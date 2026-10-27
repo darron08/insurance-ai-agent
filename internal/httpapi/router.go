@@ -20,13 +20,24 @@ import (
 )
 
 type api struct {
-	rag    rag.Service
-	search rag.Searcher
+	rag      rag.Service
+	search   rag.Searcher
+	products ProductLister
 }
 
-func New(service rag.Service, searcher rag.Searcher) http.Handler {
+// Options keeps existing API-only callers source-compatible.
+type Options struct {
+	Products ProductLister
+	Web      http.Handler
+}
+
+func New(service rag.Service, searcher rag.Searcher, options ...Options) http.Handler {
 	router := gin.New()
 	a := api{rag: service, search: searcher}
+	var web http.Handler
+	if len(options) > 0 {
+		a.products, web = options[0].Products, options[0].Web
+	}
 	router.Use(func(c *gin.Context) {
 		started := time.Now()
 		requestID := uuid.NewString()
@@ -48,7 +59,12 @@ func New(service rag.Service, searcher rag.Searcher) http.Handler {
 	router.POST("/api/rag/ask", a.ask)
 	router.POST("/api/rag/search", a.searchOnly)
 	router.GET("/api/rag/runs/:run_id", a.getRun)
+	router.GET("/api/rag/products", a.listProducts)
 	router.NoRoute(func(c *gin.Context) {
+		if web != nil && c.Request.Method == http.MethodGet && c.Request.URL.Path != "/api" && !strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			web.ServeHTTP(c.Writer, c.Request)
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": rag.Error{Code: "not_found", Message: "接口不存在"}})
 	})
 	return router

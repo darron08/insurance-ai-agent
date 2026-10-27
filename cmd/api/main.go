@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"insurance_agent_demo/internal/catalog"
 	"insurance_agent_demo/internal/embedding"
 	"insurance_agent_demo/internal/generation"
 	"insurance_agent_demo/internal/httpapi"
@@ -28,6 +29,7 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	flags := flag.NewFlagSet("api", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	listen := flags.String("listen", "127.0.0.1:8080", "HTTP 监听地址（本地演示）")
+	webDir := flags.String("web-dir", "", "可选的前端构建目录，例如 ./bin/web")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -37,6 +39,17 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	if flags.NArg() != 0 {
 		fmt.Fprintln(stderr, "不接受位置参数")
 		return 2
+	}
+	var web http.Handler
+	if *webDir != "" {
+		var closeWeb func() error
+		var err error
+		web, closeWeb, err = httpapi.WebHandler(*webDir)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		defer closeWeb()
 	}
 	cfg, err := rag.NewConfig(getenv("LLM_BASE_URL"), getenv("LLM_MODEL"))
 	if err != nil {
@@ -70,8 +83,9 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	defer db.Close()
 	searcher := retrieval.Service{Repository: postgres.SearchRepository{DB: db}, Embedder: embedder, Profile: profile}
 	service := rag.Service{Searcher: searcher, Generator: generator, Runs: postgres.RunRepository{DB: db}, Config: cfg}
-	fmt.Fprintln(stdout, "M6 API 监听配置:", *listen)
-	if err := serve(ctx, *listen, httpapi.New(service, searcher)); err != nil {
+	directory := catalog.DirectoryService{Repository: postgres.ProductRepository{DB: db}, Profile: profile}
+	fmt.Fprintln(stdout, "本地服务监听配置:", *listen)
+	if err := serve(ctx, *listen, httpapi.New(service, searcher, httpapi.Options{Products: directory, Web: web})); err != nil {
 		fmt.Fprintln(stderr, "HTTP 服务启动或关闭失败")
 		return 1
 	}
