@@ -4,16 +4,18 @@
 
 This repository is a learning-oriented insurance AI agent built in small, reviewable milestones.
 Keep each change scoped to the active milestone and preserve code readability for study.
-The current milestone is M5: product-scoped vector retrieval over ready M4 indexes, including Query Embedding, explicit version selection, HNSW search, and an exact Top K baseline.
+The current milestone is M6: evidence-grounded, non-streaming insurance answers over M5 retrieval, with validated citations, abstention, HTTP APIs, and persistent run snapshots.
 
 ## Architecture boundaries
 
 - Go owns the CLI, validation, metadata, SHA-256, quality gates, deterministic chunking, JSON persistence, and PostgreSQL persistence.
 - Python is limited to PDF text extraction through `pdfplumber`.
 - Keep third-party parser details behind `internal/parser.Parser`.
-- Keep PostgreSQL details behind the catalog, indexing, and retrieval repository boundaries so later Gin handlers and workers can reuse application services.
-- Keep Eino types inside the Embedding adapter; application services use project-owned interfaces and context.Context.
-- M5 uses Eino only for Embedding and exposes retrieval through a CLI. Do not add answer generation, Gin, Graph, Agent, Redis, Elasticsearch, reranking, hybrid search, or React work to M5.
+- Keep PostgreSQL details behind the catalog, indexing, retrieval, and RAG run repository boundaries so handlers and workers can reuse application services.
+- Keep Eino types inside the Embedding and generation adapters; application services use project-owned interfaces and context.Context.
+- M6 reuses M5 retrieval and adds Eino generation and a minimal Gin API. Do not add Graph, Agent, Memory, Redis, Elasticsearch, reranking, hybrid search, streaming, or React work to M6.
+- M6 uses DeepSeek Flash JSON output with thinking disabled. Validate every citation against the actual evidence snapshot; similarity is never an answerability threshold. Partially supported questions require whole-question abstention.
+- Persist run evidence and source snapshots independently of live Chunk rows. Keep all model requests outside database transactions and never persist API keys or provider reasoning content.
 - M4/M5 default to locally served `Qwen/Qwen3-Embedding-0.6B` with 1024-dimensional vectors through an OpenAI-compatible endpoint.
 - Retrieval must require a product, resolve a unique ready version or require explicit selection, and reject incompatible document embedding profiles. Preserve the distinction between omitted version and the legacy empty version.
 - Generate query vectors before starting the short read-only repeatable-read search transaction. Keep status, profile, text, and vector reads in the same snapshot; retrieval does not acquire document write locks.

@@ -1,6 +1,6 @@
 # 通用保险 AI Agent
 
-当前完成 M5：通过 Go 命令将本地文本型 PDF 解析、切分、幂等写入 PostgreSQL，用 Eino 调用 Embedding API 建立向量索引，再按产品和版本检索相关条款与来源。默认 HNSW，提供 exact 精确检索对照。
+当前完成 M6：在 M5 产品与版本检索基础上，通过 Eino 调用 DeepSeek Flash 生成带引用的保险条款解释或明确拒答，并保存可复盘的运行快照。提供最小非流式 HTTP API；M1–M5 的独立命令继续可用。固定12个真实联调样本通过，范围与限制见 M6 学习说明。
 
 ## 环境与运行
 
@@ -252,4 +252,36 @@ Go 负责校验、SHA-256、质量门槛和 JSON 落盘，内嵌 Python 脚本�
 
 M2 的章节识别是确定性启发式，不会使用 LLM 猜测标题或修复条款文字。PDF 若缺少明确条款编号、标题排版异常或表格阅读顺序复杂，可能只得到无条款编号的普通文本 Chunk；这类结果仍需对照原 PDF 人工抽查。固定的 800/100 参数用于建立首个可比较基线，后续质量优化阶段再比较其他策略。
 
-代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md)、[M3 学习说明](docs/learning/m3-postgresql-persistence.md)、[M4 学习说明](docs/learning/m4-embedding-indexing.md) 和 [M5 学习说明](docs/learning/m5-vector-retrieval.md)。
+代码阅读、原理和动手实验见 [M1 学习说明](docs/learning/m1-pdf-ingest.md)、[M2 学习说明](docs/learning/m2-clause-chunking.md)、[M3 学习说明](docs/learning/m3-postgresql-persistence.md)、[M4 学习说明](docs/learning/m4-embedding-indexing.md)、[M5 学习说明](docs/learning/m5-vector-retrieval.md) 和 [M6 学习说明](docs/learning/m6-evidence-grounded-answers.md)。
+
+## 基于证据的问答 API（M6）
+
+先完成文档索引，沿用索引时的 `DATABASE_URL` 和 `EMBEDDING_*` 配置，显式运行新增迁移，再启动 API。以下命令不会自动读取 `.env`；请将密钥配置在本地 shell 环境，不要写入命令历史或提交到仓库。
+
+```bash
+go run ./cmd/migrate --action up
+export LLM_BASE_URL='https://api.deepseek.com'
+export LLM_MODEL='deepseek-flash'
+# 在本地安全配置 LLM_API_KEY；若已配置 DEEPSEEK_API_KEY，可在 shell 中映射：
+export LLM_API_KEY="$DEEPSEEK_API_KEY"
+go run ./cmd/api --listen 127.0.0.1:8080
+```
+
+```bash
+curl -sS http://127.0.0.1:8080/api/rag/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"product_id":"demo","question":"等待期是多久？","top_k":5,"mode":"hnsw"}'
+curl -sS http://127.0.0.1:8080/api/rag/search \
+  -H 'Content-Type: application/json' \
+  -d '{"product_id":"demo","query":"等待期","mode":"exact","top_k":5}'
+curl -sS http://127.0.0.1:8080/api/rag/runs/<run_id>
+curl -sS http://127.0.0.1:8080/healthz
+```
+
+Ask 返回 `run_id`、实际 `version`、`answer`、`citations`、`abstained`、拒答时的 `reason`、`usage`、`usage_scope` 和 `timings`。正文中的 `[1]` 等标记对应引用 `id`；引用包含原文摘录和完整来源快照。`usage_scope=generation`，`usage=null` 表示供应商没有提供生成用量，不表示零 Token，也不包含 Query Embedding 用量。
+
+省略 `version` 或传 `null` 选择唯一 ready 版本，`"version":""` 明确选择旧空版本。Ask 的 Top K 为 1–20，Search 为 1–100，均默认 5、HNSW；问题最长 2000 个 Unicode 字符，JSON 请求体最大 32 KiB。HTTP 200 也可能是明确拒答，必须检查 `abstained`；无 ready 文档为 404，版本歧义/模型配置不匹配为 409，生成或引用校验失败为 502，存储失败为 503，总请求超时为 504。错误体是 `{"error":{"code":"...","message":"...","run_id":"..."}}`，版本歧义另含 `versions`。
+
+证据只支持问题的一部分时整题拒答；资料冲突返回冲突双方的引用，正式核保或核赔请求提示联系正式渠道。相似度不是拒答阈值，引用校验也不证明语义推理正确。服务默认本机监听，无登录与公开部署保护；运行详情含问题、公开/授权证据和模型最终内容，仅用于本地复盘。`running` 表示尚无最终结果，也可能是进程中断遗留，M6 不自动恢复。
+
+自动化测试与手动真实联调的命令、完整 JSON 契约和验收记录见 [M6 学习说明](docs/learning/m6-evidence-grounded-answers.md)。

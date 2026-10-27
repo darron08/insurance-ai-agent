@@ -227,6 +227,10 @@ func TestM4IndexingIntegration(t *testing.T) {
 
 func TestM4MigrationPreservesM3Data(t *testing.T) {
 	db, ctx := indexTestDB(t)
+	// Remove M6 before stepping through M4's append-only history.
+	if err := RunMigrations(ctx, db, MigrationDown); err != nil {
+		t.Fatal(err)
+	}
 	// M4 now has two append-only migrations: 00002 introduced the original
 	// 1536-dimensional schema and 00003 switched it to local Qwen/1024.
 	if err := RunMigrations(ctx, db, MigrationDown); err != nil {
@@ -247,6 +251,9 @@ func TestM4MigrationPreservesM3Data(t *testing.T) {
 	p, _ := indexing.NewProfile("", "")
 	s := indexing.Service{Repository: IndexRepository{DB: db}, Profile: p, Embedder: embeddingFunc(func(_ context.Context, texts []string) ([][]float64, error) { return embeddingVectors(len(texts)), nil })}
 	if _, err := s.Index(ctx, indexing.Request{DocumentID: stored.DocumentID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunMigrations(ctx, db, MigrationDown); err != nil {
 		t.Fatal(err)
 	}
 	if err := RunMigrations(ctx, db, MigrationDown); err != nil {

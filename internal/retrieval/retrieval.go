@@ -18,8 +18,9 @@ const (
 )
 
 var (
-	ErrNoReadyDocuments = errors.New("所选产品或版本没有可检索的 ready 文档，请先完成索引")
-	ErrProfileMismatch  = errors.New("所选版本的 Embedding 配置与查询不同，请使用索引时的配置或重新索引")
+	ErrNoReadyDocuments     = errors.New("所选产品或版本没有可检索的 ready 文档，请先完成索引")
+	ErrProfileMismatch      = errors.New("所选版本的 Embedding 配置与查询不同，请使用索引时的配置或重新索引")
+	ErrEmbeddingUnavailable = errors.New("Query Embedding 服务不可用")
 )
 
 // VersionRequiredError includes every ready version, including the legacy empty version.
@@ -145,7 +146,7 @@ func (s Service) Search(ctx context.Context, req Request) (Result, error) {
 	}
 	vector, err := s.Embedder.EmbedQuery(ctx, req.Query)
 	if err != nil {
-		return Result{}, fmt.Errorf("生成 Query Embedding: %w", err)
+		return Result{}, fmt.Errorf("生成 Query Embedding: %w: %w", ErrEmbeddingUnavailable, err)
 	}
 	if err := indexing.ValidateVectors([][]float64{vector}, 1); err != nil {
 		return Result{}, err

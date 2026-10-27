@@ -161,6 +161,10 @@ func TestMigrationsAndRepository(t *testing.T) {
 		t.Fatalf("cascade chunk count = %d, error = %v", chunkCount, err)
 	}
 
+	// M6 is the newest migration. Roll it back before checking M4/M3 history.
+	if err := RunMigrations(ctx, db, MigrationDown); err != nil {
+		t.Fatal(err)
+	}
 	if err := RunMigrations(ctx, db, MigrationDown); err != nil {
 		t.Fatal(err)
 	}
