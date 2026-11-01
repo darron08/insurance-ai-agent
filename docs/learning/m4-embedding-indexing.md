@@ -41,7 +41,7 @@ CLI 只把参数转成 `indexing.Request`。后续 Gin Handler 可以调用同�
 
 ## 从 Chunk 到索引
 
-先按 README 完成 `ingest → chunk → store`，记录 `store` 输出的 UUID。另行安装 vLLM 并启动本地 OpenAI 兼容服务：
+先按[本地运行与开发指南](../getting-started.md)完成 `ingest → chunk → store`，记录 `store` 输出的 UUID。另行安装 vLLM 并启动本地 OpenAI 兼容服务：
 
 ```bash
 vllm serve Qwen/Qwen3-Embedding-0.6B \

@@ -63,7 +63,7 @@ Go 为每个结论校验证据编号，并检查每段摘录确实是对应 Chun
 
 ## API、运行状态与失败语义
 
-运行步骤和 curl 示例见 README 的 M6 段落。服务不会自动迁移或自动加载 `.env`；`LLM_API_KEY` 必填，默认监听本机 `127.0.0.1:8080`，用 `--listen` 指定端口。服务共享数据库池，支持请求取消与 SIGINT/SIGTERM 后的优雅退出。
+运行步骤和 curl 示例见[本地运行与开发指南](../getting-started.md#基于证据的问答-apim6)。服务不会自动迁移或自动加载 `.env`；`LLM_API_KEY` 必填，默认监听本机 `127.0.0.1:8080`，用 `--listen` 指定端口。服务共享数据库池，支持请求取消与 SIGINT/SIGTERM 后的优雅退出。
 
 Ask 输入为 `product_id`、`question`、可选 `version`、`top_k`、`mode`。`version` 省略/null 与显式空字符串保持 M5 语义。Ask Top K 1–20，Search Top K 1–100，均默认 5 和 HNSW；HTTP Search 使用 `query`。Ask/Search 问题上限 2000 个 Unicode 字符，单个 JSON 请求不超过 32 KiB，拒绝未知字段。
 

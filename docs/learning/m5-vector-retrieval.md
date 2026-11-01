@@ -141,6 +141,6 @@ go build -o ./bin/ ./cmd/...
 
 耗时包括 Query Embedding、模型加载/缓存、数据库往返和读取，且两种模式依次执行；不能据此判断 HNSW 与 exact 的数据库性能。小数据集还可能由优化器选择精确扫描，HNSW 索引路径的可用性由另行强制路径的集成测试验证。六条样本只是联调冒烟结果，不构成通用召回率或回答正确率评测。
 
-本机原始记录在忽略目录 `var/m5-smoke/`：`fixtures.json` 记录文档 ID 与 Chunk 路径，`cases.json` 记录问题与预期证据，`results.json` 保存两种模式的完整 Top 5、原文、分数、来源和耗时。`_runner/main.go` 是本次本地验收辅助程序，不进入版本控制，也不会被 `go test ./...` 发现。克隆仓库后可按 README 的六个独立 CLI 复现同一数据链，无需这些本地产物。
+本机原始记录在忽略目录 `var/m5-smoke/`：`fixtures.json` 记录文档 ID 与 Chunk 路径，`cases.json` 记录问题与预期证据，`results.json` 保存两种模式的完整 Top 5、原文、分数、来源和耗时。`_runner/main.go` 是本次本地验收辅助程序，不进入版本控制，也不会被 `go test ./...` 发现。克隆仓库后可按[本地运行与开发指南](../getting-started.md)中的六个独立 CLI 复现同一数据链，无需这些本地产物。
 
 Go 1.27.3 下的全量普通测试、竞态测试、vet 和六个 CLI 构建均通过；普通与竞态测试均包含真实独立数据库的 M3–M5 集成测试及两份真实 PDF 的解析、切分回归。另用构建后的 `bin/search` 执行真实 exact 查询，核对了最终 JSON、版本、模板/配置标识、原文及完整来源。

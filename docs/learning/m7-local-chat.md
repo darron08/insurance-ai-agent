@@ -55,7 +55,7 @@ flowchart LR
 
 ## 本地运行与验证
 
-先按 README 配置 `DATABASE_URL`、`EMBEDDING_*` 和 `LLM_API_KEY`。模型密钥只在 Go 进程环境中，页面没有模型配置或密钥输入。环境文件不自动加载。
+先按[本地运行与开发指南](../getting-started.md#本地浏览器问答m7)配置 `DATABASE_URL`、`EMBEDDING_*` 和 `LLM_API_KEY`。模型密钥只在 Go 进程环境中，页面没有模型配置或密钥输入。环境文件不自动加载。
 
 ```bash
 # 项目根目录；Node 24
